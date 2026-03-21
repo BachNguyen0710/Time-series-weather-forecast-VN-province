@@ -1,0 +1,7 @@
+numpy
+requests
+pandas
+scikit-learn
+meteostat
+matplotlib
+seaborn
