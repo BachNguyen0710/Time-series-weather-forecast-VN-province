@@ -1,15 +1,22 @@
-# -*- coding: utf-8 -*-
 
 from pathlib import Path
 import sys
 import pandas as pd
-import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from joblib import dump
-from sklearn.tree import DecisionTreeRegressor, plot_tree
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+import seaborn as sns
+
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+)
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 from tabulate import tabulate
 
@@ -63,18 +70,18 @@ def load_and_prepare_data():
     (X_train, y_train), (X_val, y_val), (X_test, y_test), _ = split_and_scale(df_processed)
     return (
         X_train,
-        y_train.values,
+        (y_train > 0).astype(int).values,
         X_val,
-        y_val.values,
+        (y_val > 0).astype(int).values,
         X_test,
-        y_test.values,
+        (y_test > 0).astype(int).values,
         feature_names,
     )
 
 
 def build_decision_tree(max_depth=6, min_samples_leaf=10):
-    model = DecisionTreeRegressor(
-        criterion="squared_error",
+    model = DecisionTreeClassifier(
+        criterion="gini",
         max_depth=max_depth,
         min_samples_leaf=min_samples_leaf,
         random_state=42,
@@ -93,7 +100,7 @@ def fit_model(model, X, y):
 
 def _log_grid_search_results(grid: GridSearchCV, outdir: Path):
     cv_df = pd.DataFrame(grid.cv_results_)
-    cv_df["mean_test_rmse"] = (-cv_df["mean_test_score"]).round(4)
+    cv_df["mean_test_f1"] = cv_df["mean_test_score"].round(4)
     cv_df.to_csv(outdir / "grid_search_results.csv", index=False)
 
     summary = (
@@ -105,7 +112,7 @@ def _log_grid_search_results(grid: GridSearchCV, outdir: Path):
                 "param_max_depth",
                 "param_min_samples_leaf",
                 "param_min_samples_split",
-                "mean_test_rmse",
+                "mean_test_f1",
                 "rank_test_score",
             ],
         ]
@@ -118,11 +125,11 @@ def _log_grid_search_results(grid: GridSearchCV, outdir: Path):
             }
         )
         .head(5)
-        .round({"mean_test_rmse": 4})
+        .round({"mean_test_f1": 4})
     )
     summary.to_csv(outdir / "grid_search_top5.csv", index=False)
 
-    print("\nGrid search top 5 runs (sorted by CV RMSE):")
+    print("\nGrid search top 5 runs (sorted by CV F1 score):")
     print(tabulate(summary, headers="keys", tablefmt="github", showindex=False))
 
 
@@ -135,18 +142,18 @@ def train_with_grid(X_train, y_train):
     }
     tscv = TimeSeriesSplit(n_splits=5)
     grid = GridSearchCV(
-        DecisionTreeRegressor(random_state=42),
+        DecisionTreeClassifier(random_state=42),
         param_grid,
         cv=tscv,
-        scoring="neg_root_mean_squared_error",
+        scoring="f1",
         n_jobs=1,
         verbose=1,
         return_train_score=False,
     )
-    print("Running GridSearchCV (TimeSeriesSplit + RMSE)...")
+    print("Running GridSearchCV (TimeSeriesSplit + F1)...")
     grid.fit(X_train, y_train)
     print("Best params:", grid.best_params_)
-    print(f"Best CV RMSE: {-grid.best_score_:.4f}")
+    print(f"Best CV F1: {grid.best_score_:.4f}")
     _log_grid_search_results(grid, grid_dir)
     return grid.best_estimator_
 
@@ -159,33 +166,49 @@ def evaluate_model(model, X, y, feature_names, prefix="validation"):
     outdir = ensure_path(REPORTS_DIR / prefix)
     prediction = model.predict(X)
 
-    rmse = np.sqrt(mean_squared_error(y, prediction))
-    mae = mean_absolute_error(y, prediction)
-    r2 = r2_score(y, prediction)
+    accuracy = accuracy_score(y, prediction)
+    precision = precision_score(y, prediction, zero_division=0)
+    recall = recall_score(y, prediction, zero_division=0)
+    f1 = f1_score(y, prediction, zero_division=0)
+    cm = confusion_matrix(y, prediction)
 
     metrics_df = pd.DataFrame(
         {
-            "metric": ["rmse", "mae", "r2"],
-            "value": [rmse, mae, r2],
+            "metric": ["accuracy", "precision", "recall", "f1_score"],
+            "value": [accuracy, precision, recall, f1],
         }
     )
     metrics_df["value"] = metrics_df["value"].round(4)
     metrics_df.to_csv(outdir / "metrics.csv", index=False)
 
-    print(f"\n[{prefix.upper()}] Evaluation")
-    print(tabulate(metrics_df, headers="keys", tablefmt="github", showindex=False))
+    report = classification_report(
+        y,
+        prediction,
+        target_names=["no_rain", "rain"],
+        zero_division=0,
+    )
+    (outdir / "classification_report.txt").write_text(report)
 
-    plt.figure(figsize=(6, 6))
-    plt.scatter(y, prediction, alpha=0.4, s=10)
-    min_val = min(y.min(), prediction.min())
-    max_val = max(y.max(), prediction.max())
-    plt.plot([min_val, max_val], [min_val, max_val], color="red", linestyle="--")
-    plt.title(f"Actual vs Predicted ({prefix})")
-    plt.xlabel("Actual rain")
-    plt.ylabel("Predicted rain")
-    plt.grid(True)
+    print(f"\n[{prefix.upper()}] Evaluation (binary classification)")
+    print(tabulate(metrics_df, headers="keys", tablefmt="github", showindex=False))
+    print("\nClassification report:")
+    print(report)
+
+    plt.figure(figsize=(6, 4))
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt="d",
+        cmap="Blues",
+        cbar=False,
+        xticklabels=["no_rain", "rain"],
+        yticklabels=["no_rain", "rain"],
+    )
+    plt.ylabel("Actual")
+    plt.xlabel("Predicted")
+    plt.title(f"Confusion Matrix ({prefix})")
     plt.tight_layout()
-    plt.savefig(outdir / "actual_vs_predicted.png")
+    plt.savefig(outdir / "confusion_matrix.png")
     plt.close()
 
     plt.figure(figsize=(12, 6))
