@@ -5,3 +5,6 @@ scikit-learn
 meteostat
 matplotlib
 seaborn
+torch
+torchvision
+torchaudio

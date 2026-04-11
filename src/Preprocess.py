@@ -20,6 +20,7 @@ def create_features(df):
     df['rain_roll24'] = df.groupby('city')['rain'] \
         .shift(1).rolling(24).mean().reset_index(0, drop=True)
     df['target'] = df.groupby('city')['rain'].shift(-1)
+    df['target'] = (df['target'] > 0).astype(int)
     df = pd.get_dummies(df, columns=['city'], drop_first=True)
     df = df.dropna().reset_index(drop=True)
 
