@@ -1,0 +1,6 @@
+max_depth,min_samples_leaf,min_samples_split,mean_test_f1,rank
+6,30,30,0.6229,1
+6,30,10,0.6229,1
+6,30,5,0.6229,1
+6,30,40,0.6229,1
+6,30,20,0.6229,1
