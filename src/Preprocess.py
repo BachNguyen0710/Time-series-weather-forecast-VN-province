@@ -19,10 +19,8 @@ def create_features(df):
 
     df['rain_roll24'] = df.groupby('city')['rain'] \
         .shift(1).rolling(24).mean().reset_index(0, drop=True)
-    
-   # df['target'] = df.groupby('city')['rain'].shift(-1)
-    df['target'] = (df.groupby('city')['rain'].shift(-1) > 0.1).astype(int)
-
+    df['target'] = df.groupby('city')['rain'].shift(-1)
+    df['target'] = (df['target'] > 0).astype(int)
     df = pd.get_dummies(df, columns=['city'], drop_first=True)
     df = df.dropna().reset_index(drop=True)
 
@@ -64,21 +62,15 @@ def preprocess_pipeline(df):
 def save_to_json(X, y, path):
     import json
     data = []
-    
-    print(f"⌛ Đang xử lý file: {path}")
-    print(f"   -> Mẫu target đầu tiên trước khi ép kiểu: {y.iloc[0]}")
 
     for i in range(len(X)):
-        target_val = int(round(float(y.iloc[i])))
         data.append({
             "features": X[i].tolist(),
-            "target": target_val
+            "target": float(y.iloc[i])
         })
 
     with open(path, "w") as f:
         json.dump(data, f)
-
-    print(f"✅ Đã lưu thành công: {path}\n")
 
 if __name__ == "__main__":
     df = pd.read_csv("../data/processed/data.csv")
